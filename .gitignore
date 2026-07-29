@@ -4,6 +4,7 @@
 !training_data_pipeline/*.py
 !dl_model/
 !dl_model/*.py
+!dl_model/*.pth
 *v8*
 alignment_features.py
 __pycache__/
