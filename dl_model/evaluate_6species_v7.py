@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import logging
+import os
 import sys
 
 import numpy as np
@@ -25,7 +26,7 @@ from train_rnn_v7 import (
     process_dataframe,
 )
 
-MODEL_PATH = "/mnt/c/work/profiler_testing/dl_orthology_model_v7.pth"
+MODEL_PATH = "dl_orthology_model_v7.pth" if os.path.exists("dl_orthology_model_v7.pth") else "/mnt/c/work/profiler_testing/dl_model/dl_orthology_model_v7.pth"
 VALIDATION_DIR = "/mnt/c/work/profiler_testing/ensembl_validation"
 
 SPECIES_LIST = [

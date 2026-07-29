@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""ExonRNN v7 — divergence-reliability-gated V6.
+"""ExonRNN v7 — V6 + divergence-reliability signal.
 
-V7 retains V6 sequence/divergence features, but adds continuous, species-agnostic
-features that let the network downweight raw distance evidence as d4v increases.
-It also stratifies sampling by d4v depth, so the small deep-divergence regime is
-not overwhelmed by recent examples.  This is intentionally still a row-level
-classifier: pairwise-ranking training requires an explicit triplet_id emitted by
-the data generator and must not be reconstructed from transcript/species alone.
+V7 retains V6 features and adds a single continuous reliability scalar
+(exp(-d4v/1.5)) as a raw input feature.  The MLP learns how to weight
+alignment-dependent features at different divergences rather than using
+a hardcoded multiplicative gate (which caused non-monotonic confusion
+between zero-divergence and deep-divergence regimes).
 """
 import concurrent.futures
 import logging
@@ -39,7 +38,7 @@ EXON_EXTRA_NAMES = ['delta_exon', 'total_exons']
 
 # All are continuous and scaled.  Gate and interaction features use RAW feature
 # values before V6's log1p transform.  They contain no species or locus identity.
-RELIABILITY_NAMES = ['d4v_reliability', 'd4v_gated', 'ks_gated', 'ka_gated']
+RELIABILITY_NAMES = ['d4v_reliability']
 N_BASE_CONTINUOUS = len(EXON_FEATS)
 N_EXON_CONTINUOUS = N_BASE_CONTINUOUS + len(RELIABILITY_NAMES)
 N_GLOBAL_CONTINUOUS = N_EXON_CONTINUOUS + 1  # + intra-transcript Ka/Ks std
@@ -50,13 +49,10 @@ def finite_nonnegative(x):
 
 
 def reliability_block(feats):
-    """Smooth reliability gate: 1 near d4v=0, falling at deeper divergence."""
+    """Divergence reliability signal: 1 near d4v=0, decaying at deeper divergence.
+    Fed as a raw feature so the MLP learns the interaction — no manual gating."""
     d4v = finite_nonnegative(feats.get('d4v', np.nan))
-    ks = finite_nonnegative(feats.get('ks', np.nan))
-    ka = finite_nonnegative(feats.get('ka', np.nan))
-    # 1.0 at d4v=0; about 0.72 at 0.5; 0.37 at 1.5; 0.19 at 2.4.
-    gate = float(np.exp(-d4v / 1.5))
-    return [gate, d4v * gate, ks * gate, ka * gate]
+    return [float(np.exp(-d4v / 1.5))]
 
 
 def depth_band_from_d4v(d4v):
@@ -199,12 +195,11 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True; torch.backends.cudnn.benchmark = False
 
 
-def get_stratified_sampler(species, depths, labels, seed):
-    # Equalizes observed species × class × depth strata.  A deep band with a
-    # missing class is not fabricated; it simply cannot contribute that class.
-    strata = [f'{s}|{d}|{int(y)}' for s, d, y in zip(species, depths, labels)]
-    counts = pd.Series(strata).value_counts()
-    weights = torch.DoubleTensor([1.0 / counts[s] for s in strata])
+def get_species_sampler(species_list, labels, seed=0):
+    """V6-style species × label balanced sampler."""
+    combined = [f"{sp}_{int(lbl)}" for sp, lbl in zip(species_list, labels)]
+    counts = pd.Series(combined).value_counts().to_dict()
+    weights = torch.DoubleTensor([1.0 / counts[c] for c in combined])
     return WeightedRandomSampler(weights, len(weights), replacement=True,
                                  generator=torch.Generator().manual_seed(seed))
 
@@ -244,7 +239,7 @@ def main():
     xte, gte = apply_scalers(xte, gte, exon_scaler, global_scaler)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info('Device: %s; exon_dim=%d; global_dim=%d', device, xtr[0].shape[1], gtr.shape[1])
-    train_loader = DataLoader(ExonDataset(xtr, gtr, ytr), batch_size=256, sampler=get_stratified_sampler(sptr, dtr, ytr, seed), collate_fn=collate_fn)
+    train_loader = DataLoader(ExonDataset(xtr, gtr, ytr), batch_size=256, sampler=get_species_sampler(sptr, ytr, seed), collate_fn=collate_fn)
     test_loader = DataLoader(ExonDataset(xte, gte, yte), batch_size=256, shuffle=False, collate_fn=collate_fn)
     model = ExonRNN(xtr[0].shape[1], gtr.shape[1]).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
