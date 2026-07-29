@@ -1,0 +1,4 @@
+*
+!.gitignore
+!training_data_pipeline/
+!training_data_pipeline/*.py
