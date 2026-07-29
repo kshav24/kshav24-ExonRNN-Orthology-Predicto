@@ -2,3 +2,10 @@
 !.gitignore
 !training_data_pipeline/
 !training_data_pipeline/*.py
+!dl_model/
+!dl_model/*.py
+!extract_features_minimal.py
+!alignment_features.py
+__pycache__/
+*.pyc
+scratch/
