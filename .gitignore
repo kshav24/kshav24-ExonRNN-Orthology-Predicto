@@ -10,3 +10,5 @@ alignment_features.py
 __pycache__/
 *.pyc
 scratch/
+!v7c_v10_4species_bundle/
+!v7c_v10_4species_bundle/*
